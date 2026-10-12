@@ -102,7 +102,7 @@ async function fetchProduct(url) {
   endpoint.searchParams.set("url", url);
   endpoint.searchParams.set("data", "title,image,description");
 
-  const response = await fetch(endpoint);
+  const response = await fetch(endpoint.toString());
   if (!response.ok) {
     throw new Error("情報取得に失敗しました");
   }

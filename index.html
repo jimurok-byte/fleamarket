@@ -1,0 +1,273 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>フリマ商品一覧</title>
+<style>
+body {
+  font-family: sans-serif;
+  max-width: 1000px;
+  margin: 20px auto;
+  padding: 0 12px;
+}
+input { box-sizing: border-box; width: 100%; padding: 10px; }
+button { padding: 10px 16px; margin: 6px 0; cursor: pointer; }
+#inputs { display: grid; gap: 8px; }
+#items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.item { border: 1px solid #ccc; border-radius: 8px; padding: 12px; }
+.item img { width: 100%; height: 180px; object-fit: contain; }
+.item a { overflow-wrap: anywhere; }
+.small { color: #666; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>フリマ商品一覧</h1>
+
+<section id="editor">
+  <p>商品ページのURLを最大9件入力してください。</p>
+  <div id="inputs"></div>
+  <button id="add">URL欄を追加</button>
+  <button id="create">情報を取得して共有URLを作成</button>
+  <p id="message" role="status"></p>
+</section>
+
+<section id="viewer" hidden>
+  <button id="back">URL入力画面へ戻る</button>
+  <div id="items"></div>
+  <button id="copy">この一覧のURLをコピー</button>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const allowedHosts = [
+  "jp.mercari.com",
+  "paypayfleamarket.yahoo.co.jp",
+  "fril.jp"
+];
+
+function isAllowed(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" &&
+      allowedHosts.some(h =>
+        u.hostname === h || u.hostname.endsWith("." + h)
+      );
+  } catch {
+    return false;
+  }
+}
+
+// UTF-8対応のBase64 URLエンコード
+function encodeData(data) {
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function decodeData(encoded) {
+  const base64 = encoded.replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(
+    binary, c => c.charCodeAt(0)
+  );
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function addInput(value = "") {
+  if ($("inputs").children.length >= 9) return;
+  const input = document.createElement("input");
+  input.type = "url";
+  input.placeholder = "https://商品ページのURL";
+  input.value = value;
+  input.className = "product-url";
+  $("inputs").append(input);
+}
+
+$("add").onclick = () => addInput();
+
+async function fetchProduct(url) {
+  // 外部メタデータサービスを利用する試作版
+  const endpoint = new URL("https://api.microlink.io/");
+  endpoint.searchParams.set("url", url);
+  endpoint.searchParams.set("data", "title,image,description");
+
+  const response = await fetch(endpoint);
+  if (!response.ok) throw new Error("情報取得に失敗しました");
+
+  const result = await response.json();
+  if (result.status !== "success") {
+    throw new Error("商品情報を取得できませんでした");
+  }
+
+  const d = result.data || {};
+  const title = d.title || "商品名を取得できませんでした";
+  const image = d.image?.url || "";
+  const description = d.description || "";
+
+  // テキスト内の価格らしき数字を推定するだけ。
+  // 商品価格である保証はないので、要確認として扱う。
+  const text = title + " " + description;
+  const match = text.match(
+    /(?:¥|￥)\s*([\d,]+)|([\d,]+)\s*円/
+  );
+  const price = match
+    ? Number((match[1] || match[2]).replace(/,/g, ""))
+    : null;
+
+  return {
+    url,
+    title,
+    image,
+    price,
+    available: null
+  };
+}
+
+$("create").onclick = async () => {
+  const urls = [...document.querySelectorAll(".product-url")]
+    .map(el => el.value.trim())
+    .filter(Boolean);
+
+  if (!urls.length) {
+    $("message").textContent = "URLを入力してください。";
+    return;
+  }
+
+  if (urls.some(url => !isAllowed(url))) {
+    $("message").textContent =
+      "対応するフリマサイトの商品URLを確認してください。";
+    return;
+  }
+
+  $("create").disabled = true;
+  $("message").textContent = "商品情報を取得しています…";
+
+  try {
+    const products = [];
+    for (const url of urls) {
+      try {
+        products.push(await fetchProduct(url));
+      } catch {
+        // 取得に失敗しても商品URLは一覧に残す
+        products.push({
+          url,
+          title: "情報を取得できませんでした",
+          image: "",
+          price: null,
+          available: null
+        });
+      }
+    }
+
+    const shareUrl = new URL(location.href);
+    shareUrl.search = "";
+    shareUrl.hash = "";
+    shareUrl.searchParams.set("d", encodeData(products));
+
+    if (shareUrl.href.length > 15000) {
+      $("message").textContent =
+        "URLが長くなりました。画像URLなどの情報を減らす必要があります。";
+      return;
+    }
+
+    history.replaceState(null, "", shareUrl.href);
+    showProducts(products);
+    $("message").textContent = "";
+  } catch (e) {
+    $("message").textContent = "エラー: " + e.message;
+  } finally {
+    $("create").disabled = false;
+  }
+};
+
+function showProducts(products) {
+  $("editor").hidden = true;
+  $("viewer").hidden = false;
+  $("items").replaceChildren();
+
+  for (const p of products) {
+    const card = document.createElement("article");
+    card.className = "item";
+
+    if (p.image) {
+      const img = document.createElement("img");
+      img.src = p.image;
+      img.alt = p.title || "商品画像";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      card.append(img);
+    }
+
+    const title = document.createElement("h3");
+    title.textContent = p.title || "商品名不明";
+    card.append(title);
+
+    const price = document.createElement("p");
+    price.textContent = p.price == null
+      ? "価格：未取得"
+      : "価格：約 " + p.price.toLocaleString("ja-JP") + " 円（要確認）";
+    card.append(price);
+
+    const status = document.createElement("p");
+    status.textContent = p.available === true
+      ? "購入可（取得時点）"
+      : p.available === false
+        ? "売り切れ（取得時点）"
+        : "購入可否：未確認";
+    card.append(status);
+
+    const link = document.createElement("a");
+    link.href = p.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "商品ページを開く";
+    card.append(link);
+
+    $("items").append(card);
+  }
+}
+
+$("copy").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(location.href);
+    $("copy").textContent = "コピーしました";
+  } catch {
+    $("copy").textContent =
+      "アドレスバーのURLをコピーしてください";
+  }
+};
+
+$("back").onclick = () => {
+  history.replaceState(null, "", location.pathname);
+  $("viewer").hidden = true;
+  $("editor").hidden = false;
+};
+
+addInput();
+
+const encoded = new URLSearchParams(location.search).get("d");
+if (encoded) {
+  try {
+    const products = decodeData(encoded);
+    if (!Array.isArray(products) || products.length > 9) {
+      throw new Error("invalid data");
+    }
+    showProducts(products);
+  } catch {
+    $("message").textContent = "共有URLのデータが不正です。";
+  }
+}
+</script>
+</body>
+</html>

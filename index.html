@@ -100,9 +100,9 @@ $("add").onclick = () => addInput();
 async function fetchProduct(url) {
   const endpoint = new URL("https://api.microlink.io/");
   endpoint.searchParams.set("url", url);
-  endpoint.searchParams.set("data", "title,image,description");
-
-  const response = await fetch(endpoint.toString());
+  const response = await fetch(
+  "https://api.microlink.io/?url=" + encodeURIComponent(url)
+  );
   if (!response.ok) {
     throw new Error("情報取得に失敗しました");
   }

@@ -1,10 +1,11 @@
-
+```html
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>フリマ商品一覧</title>
+
 <style>
 body {
   font-family: sans-serif;
@@ -12,128 +13,220 @@ body {
   margin: 20px auto;
   padding: 0 12px;
 }
-input { box-sizing: border-box; width: 100%; padding: 10px; }
-button { padding: 10px 16px; margin: 6px 0; cursor: pointer; }
-#inputs { display: grid; gap: 8px; }
+
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+}
+
+button {
+  padding: 10px 16px;
+  margin: 6px 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+}
+
+#inputs {
+  display: grid;
+  gap: 8px;
+}
+
 #items {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
-.item { border: 1px solid #ccc; border-radius: 8px; padding: 12px; }
-.item img { width: 100%; height: 180px; object-fit: contain; }
-.item a { overflow-wrap: anywhere; }
-.small { color: #666; font-size: 13px; }
+
+.item {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+
+.item a {
+  overflow-wrap: anywhere;
+}
+
+.small {
+  color: #666;
+  font-size: 13px;
+}
+
+.error {
+  color: #c00;
+}
 </style>
 </head>
+
 <body>
 <h1>フリマ商品一覧</h1>
 
 <section id="editor">
   <p>商品ページのURLを最大9件入力してください。</p>
+
   <div id="inputs"></div>
+
   <button id="add">URL欄を追加</button>
-  <button id="create">情報を取得して共有URLを作成</button>
+  <button id="create">商品名を取得して共有URLを作成</button>
+
   <p id="message" role="status"></p>
 </section>
 
 <section id="viewer" hidden>
   <button id="back">URL入力画面へ戻る</button>
+
   <div id="items"></div>
+
   <button id="copy">この一覧のURLをコピー</button>
 </section>
 
 <script>
 const $ = id => document.getElementById(id);
+
 const allowedHosts = [
   "jp.mercari.com",
   "paypayfleamarket.yahoo.co.jp",
   "fril.jp"
 ];
 
+// 対応サイトの商品URLか確認
 function isAllowed(url) {
   try {
     const u = new URL(url);
+
     return u.protocol === "https:" &&
-      allowedHosts.some(h =>
-        u.hostname === h || u.hostname.endsWith("." + h)
+      allowedHosts.some(host =>
+        u.hostname === host ||
+        u.hostname.endsWith("." + host)
       );
   } catch {
     return false;
   }
 }
 
-// UTF-8対応のBase64 URLエンコード
+// UTF-8対応Base64エンコード
 function encodeData(data) {
-  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  const bytes = new TextEncoder().encode(
+    JSON.stringify(data)
+  );
+
   let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
+
+  for (const b of bytes) {
+    binary += String.fromCharCode(b);
+  }
+
   return btoa(binary)
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 }
 
+// UTF-8対応Base64デコード
 function decodeData(encoded) {
-  const base64 = encoded.replace(/-/g, "+")
+  const base64 = encoded
+    .replace(/-/g, "+")
     .replace(/_/g, "/");
+
   const binary = atob(base64);
+
   const bytes = Uint8Array.from(
-    binary, c => c.charCodeAt(0)
+    binary,
+    c => c.charCodeAt(0)
   );
-  return JSON.parse(new TextDecoder().decode(bytes));
+
+  return JSON.parse(
+    new TextDecoder().decode(bytes)
+  );
 }
 
+// URL入力欄を追加
 function addInput(value = "") {
-  if ($("inputs").children.length >= 9) return;
+  if ($("inputs").children.length >= 9) {
+    $("message").textContent =
+      "URL欄は最大9件です。";
+
+    return;
+  }
+
   const input = document.createElement("input");
+
   input.type = "url";
   input.placeholder = "https://商品ページのURL";
   input.value = value;
   input.className = "product-url";
+
   $("inputs").append(input);
+
+  $("message").textContent = "";
 }
 
 $("add").onclick = () => addInput();
 
-
+// Microlinkで商品名だけ取得
 async function fetchProduct(url) {
-  const endpoint = new URL("https://api.microlink.io/");
-  endpoint.searchParams.set("url", url);
-  const response = await fetch(
-  "https://api.microlink.io/?url=" + encodeURIComponent(url)
+  const endpoint = new URL(
+    "https://api.microlink.io/"
   );
+
+  endpoint.searchParams.set("url", url);
+  endpoint.searchParams.set("data", "title");
+
+  const response = await fetch(endpoint);
+
+  const body = await response.text();
+
+  let result;
+
+  try {
+    result = JSON.parse(body);
+  } catch {
+    throw new Error(
+      "APIからJSON以外の応答が返されました"
+    );
+  }
+
   if (!response.ok) {
-    throw new Error("情報取得に失敗しました");
+    throw new Error(
+      `HTTP ${response.status}: ` +
+      (result.message || body).slice(0, 300)
+    );
   }
 
-  const result = await response.json();
   if (result.status !== "success") {
-    throw new Error("商品情報を取得できませんでした");
+    throw new Error(
+      result.message || "商品名を取得できませんでした"
+    );
   }
 
-  const d = result.data || {};
+  const title = result.data?.title;
 
-  // 商品名の末尾にある「by メルカリ」を削除
-  const title = (d.title || "商品名不明")
-    .replace(/\s+by メルカリ$/, "");
+  if (!title) {
+    throw new Error("商品名が見つかりません");
+  }
 
   return {
     url: url,
-    title: title,
-    image: d.image?.url || "",
-    price: null,
-    available: null
+    title: title.replace(/\s+by メルカリ$/, "")
   };
 }
 
+// 商品名取得・共有URL作成
 $("create").onclick = async () => {
-  const urls = [...document.querySelectorAll(".product-url")]
+  const urls = [
+    ...document.querySelectorAll(".product-url")
+  ]
     .map(el => el.value.trim())
     .filter(Boolean);
 
   if (!urls.length) {
-    $("message").textContent = "URLを入力してください。";
+    $("message").textContent =
+      "URLを入力してください。";
     return;
   }
 
@@ -144,123 +237,149 @@ $("create").onclick = async () => {
   }
 
   $("create").disabled = true;
-  $("message").textContent = "商品情報を取得しています…";
+  $("add").disabled = true;
+
+  const products = [];
 
   try {
-    const products = [];
-    for (const url of urls) {
+    for (let i = 0; i < urls.length; i++) {
+      $("message").textContent =
+        `商品名を取得しています… ${i + 1}/${urls.length}`;
+
       try {
-        products.push(await fetchProduct(url));
-      } catch {
-        // 取得に失敗しても商品URLは一覧に残す
+        products.push(await fetchProduct(urls[i]));
+      } catch (e) {
         products.push({
-          url,
-          title: "情報を取得できませんでした",
-          image: "",
-          price: null,
-          available: null
+          url: urls[i],
+          title: "取得失敗: " + e.message
         });
       }
     }
 
     const shareUrl = new URL(location.href);
+
     shareUrl.search = "";
     shareUrl.hash = "";
-    shareUrl.searchParams.set("d", encodeData(products));
+
+    shareUrl.searchParams.set(
+      "d",
+      encodeData(products)
+    );
 
     if (shareUrl.href.length > 15000) {
       $("message").textContent =
-        "URLが長くなりました。画像URLなどの情報を減らす必要があります。";
+        "共有URLが長すぎます。";
       return;
     }
 
     history.replaceState(null, "", shareUrl.href);
+
     showProducts(products);
+
     $("message").textContent = "";
+
   } catch (e) {
-    $("message").textContent = "エラー: " + e.message;
+    $("message").textContent =
+      "エラー: " + e.message;
+
   } finally {
     $("create").disabled = false;
+    $("add").disabled = false;
   }
 };
 
+// 商品一覧表示
 function showProducts(products) {
   $("editor").hidden = true;
   $("viewer").hidden = false;
+
   $("items").replaceChildren();
 
   for (const p of products) {
     const card = document.createElement("article");
+
     card.className = "item";
 
-    if (p.image) {
-      const img = document.createElement("img");
-      img.src = p.image;
-      img.alt = p.title || "商品画像";
-      img.loading = "lazy";
-      img.referrerPolicy = "no-referrer";
-      card.append(img);
+    const title = document.createElement("h3");
+
+    title.textContent = p.title || "商品名不明";
+
+    if (p.title?.startsWith("取得失敗:")) {
+      title.className = "error";
     }
 
-    const title = document.createElement("h3");
-    title.textContent = p.title || "商品名不明";
     card.append(title);
 
-    const price = document.createElement("p");
-    price.textContent = p.price == null
-      ? "価格：未取得"
-      : "価格：約 " + p.price.toLocaleString("ja-JP") + " 円（要確認）";
-    card.append(price);
-
-    const status = document.createElement("p");
-    status.textContent = p.available === true
-      ? "購入可（取得時点）"
-      : p.available === false
-        ? "売り切れ（取得時点）"
-        : "購入可否：未確認";
-    card.append(status);
-
     const link = document.createElement("a");
+
     link.href = p.url;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = "商品ページを開く";
+
     card.append(link);
 
     $("items").append(card);
   }
 }
 
+// 共有URLをコピー
 $("copy").onclick = async () => {
   try {
     await navigator.clipboard.writeText(location.href);
+
     $("copy").textContent = "コピーしました";
+
   } catch {
     $("copy").textContent =
       "アドレスバーのURLをコピーしてください";
   }
 };
 
+// 入力画面に戻る
 $("back").onclick = () => {
   history.replaceState(null, "", location.pathname);
+
   $("viewer").hidden = true;
   $("editor").hidden = false;
+
+  $("copy").textContent = "この一覧のURLをコピー";
+  $("message").textContent = "";
 };
 
+// 初期化
 addInput();
 
-const encoded = new URLSearchParams(location.search).get("d");
+// 共有URLから商品一覧を復元
+const encoded = new URLSearchParams(
+  location.search
+).get("d");
+
 if (encoded) {
   try {
     const products = decodeData(encoded);
-    if (!Array.isArray(products) || products.length > 9) {
+
+    if (
+      !Array.isArray(products) ||
+      products.length > 9 ||
+      !products.every(p =>
+        p &&
+        typeof p.url === "string" &&
+        typeof p.title === "string" &&
+        isAllowed(p.url)
+      )
+    ) {
       throw new Error("invalid data");
     }
+
     showProducts(products);
+
   } catch {
-    $("message").textContent = "共有URLのデータが不正です。";
+    $("message").textContent =
+      "共有URLのデータが不正です。";
   }
 }
 </script>
 </body>
 </html>
+```

@@ -96,14 +96,16 @@ function addInput(value = "") {
 
 $("add").onclick = () => addInput();
 
+
 async function fetchProduct(url) {
-  // 外部メタデータサービスを利用する試作版
   const endpoint = new URL("https://api.microlink.io/");
   endpoint.searchParams.set("url", url);
   endpoint.searchParams.set("data", "title,image,description");
 
   const response = await fetch(endpoint);
-  if (!response.ok) throw new Error("情報取得に失敗しました");
+  if (!response.ok) {
+    throw new Error("情報取得に失敗しました");
+  }
 
   const result = await response.json();
   if (result.status !== "success") {
@@ -111,25 +113,16 @@ async function fetchProduct(url) {
   }
 
   const d = result.data || {};
-  const title = d.title || "商品名を取得できませんでした";
-  const image = d.image?.url || "";
-  const description = d.description || "";
 
-  // テキスト内の価格らしき数字を推定するだけ。
-  // 商品価格である保証はないので、要確認として扱う。
-  const text = title + " " + description;
-  const match = text.match(
-    /(?:¥|￥)\s*([\d,]+)|([\d,]+)\s*円/
-  );
-  const price = match
-    ? Number((match[1] || match[2]).replace(/,/g, ""))
-    : null;
+  // 商品名の末尾にある「by メルカリ」を削除
+  const title = (d.title || "商品名不明")
+    .replace(/\s+by メルカリ$/, "");
 
   return {
-    url,
-    title,
-    image,
-    price,
+    url: url,
+    title: title,
+    image: d.image?.url || "",
+    price: null,
     available: null
   };
 }
